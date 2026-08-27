@@ -173,7 +173,39 @@ source ../../.venv/bin/activate
 
 ---
 
-## 6. Create the `django_api` workspace member
+## 6. Install and configure Ruff (workspace root)
+
+`Ruff` is the closest equivalent to a Roslyn analyzer here — a linter (and formatter) that catches the kind of thing the C# compiler/analyzers would flag as a warning, except Python has no built-in equivalent, so nothing catches it unless you install one. The VS Code Ruff extension will still show squiggles without this step, but it'd be running whatever version happens to be bundled with the extension rather than one pinned in your lockfile — inconsistent for anyone else who clones the repo. Installing it as a real dependency now, before any app code exists, means every file from `django_api` and the future `mcp_server` gets linted the same way from commit one.
+
+Install it as a **dev dependency of the workspace root**, not a member — one linter config should apply uniformly across every member, the same way one `.editorconfig` or one set of Roslyn analyzer rules would apply across every `.csproj` in a `.sln`, rather than each project pulling its own copy:
+
+```powershell
+# from the workspace root, Py-AI-MCP-Demo\
+uv add --dev ruff
+```
+
+Add a `[tool.ruff]` section to the root `pyproject.toml`:
+
+```toml
+[tool.ruff]
+extend-exclude = ["**/migrations/*.py"]
+```
+
+The exclusion matters specifically because of what's coming in §11 — Django's `makemigrations` generates migration files with class-level `dependencies`/`operations` lists, which Ruff's `RUF012` ("mutable class default") rule flags. That boilerplate is Django's own generated convention, not something you'd hand-edit to satisfy a linter, so migrations are excluded from linting wholesale rather than patched file by file.
+
+Verify it works from the workspace root:
+
+```powershell
+uv run ruff check .
+```
+
+Should report no issues yet (there's no app code), confirming Ruff is wired to the workspace `.venv` the same way `uv run python` is.
+
+**Ask your AI assistant if you want more depth here:** *"Why does a uv workspace put shared dev tooling like Ruff at the root instead of installing it separately per member?"*
+
+---
+
+## 7. Create the `django_api` workspace member
 
 ```powershell
 mkdir src\django_api
@@ -203,7 +235,7 @@ uv add django django-ninja "psycopg[binary]"
 
 ---
 
-## 7. Scaffold the Django project and app
+## 8. Scaffold the Django project and app
 
 Still inside `src/django_api/`:
 
@@ -255,7 +287,7 @@ Py-AI-MCP-Demo/
 
 ---
 
-## 8. Django Settings edit
+## 9. Django Settings edit
 
 **Register the app.** In `config/settings.py`, add `"bookings"` to `INSTALLED_APPS`:
 
@@ -292,7 +324,7 @@ Direct equivalent of your `DefaultConnection` string in `appsettings.json`. Hard
 
 ---
 
-## 9. Define the domain models
+## 10. Define the domain models
 
 Ported from your actual `Building.cs`, `Room.cs`, and `Booking.cs`, field for field:
 
@@ -351,7 +383,7 @@ Your `BookingDbContext.OnModelCreating` seed data (Milan HQ, Building B, the fou
 
 ---
 
-## 10. Generate and apply migrations
+## 11. Generate and apply migrations
 
 ```powershell
 uv run python manage.py makemigrations bookings
@@ -372,7 +404,7 @@ You should see `bookings_building`, `bookings_room`, `bookings_booking`, plus `a
 
 ---
 
-## 11. Wire up the Admin UI
+## 12. Wire up the Admin UI
 
 ```python
 # bookings/admin.py
@@ -406,7 +438,7 @@ uv run python manage.py createsuperuser
 
 ---
 
-## 12. Run it
+## 13. Run it
 
 ```powershell
 uv run python manage.py runserver
@@ -422,7 +454,7 @@ That three-step chain working end to end is your proof that Django ↔ psycopg �
 
 ---
 
-## 13. End-of-day checklist
+## 14. End-of-day checklist
 
 - [ ] `docker compose ps` shows `bookings-postgres` healthy
 - [ ] `uv run python manage.py runserver` starts with no errors from `src/django_api/`
@@ -430,6 +462,7 @@ That three-step chain working end to end is your proof that Django ↔ psycopg �
 - [ ] `Building`, `Room`, `Booking` all appear in the admin, all empty initially
 - [ ] Created one `Building` → one `Room` in it → one `Booking` for that `Room`, all through the admin UI
 - [ ] `bookings/migrations/0001_initial.py` exists and is committed
+- [ ] `uv run ruff check .` runs clean from the workspace root (migrations excluded via `[tool.ruff] extend-exclude`)
 - [ ] `src/mcp_server/pyproject.toml` committed, reserving the Day 3 location
 - [ ] Root `pyproject.toml`, `uv.lock`, `docker-compose.yml`, and `src/django_api/pyproject.toml` are all committed; `.venv/`, `__pycache__/`, `db.sqlite3` are gitignored
 
@@ -445,6 +478,6 @@ db.sqlite3
 
 ---
 
-## 14. Bridge to Day 2
+## 15. Bridge to Day 2
 
 Tomorrow's `django-ninja` routers go over these exact models — no schema changes expected, and the seed-data task is where `Building`/`Room`/`Booking` get populated with data mirroring `BookingDbContext`'s `HasData` seed. If you do add fields once you see the API shape, that's normal — just re-run `makemigrations`/`migrate`, same discipline as adding an EF Core migration after an entity change.
