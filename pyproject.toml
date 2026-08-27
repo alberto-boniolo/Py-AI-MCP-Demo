@@ -9,3 +9,11 @@ package = false
 
 [tool.uv.workspace]
 members = ["src/*"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["RUF012"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.5",
+]
