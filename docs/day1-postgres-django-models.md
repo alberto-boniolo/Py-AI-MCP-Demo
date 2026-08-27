@@ -184,14 +184,16 @@ Install it as a **dev dependency of the workspace root**, not a member — one l
 uv add --dev ruff
 ```
 
-Add a `[tool.ruff]` section to the root `pyproject.toml`:
+Add a `[tool.ruff.lint.per-file-ignores]` section to the root `pyproject.toml`:
 
 ```toml
-[tool.ruff]
-extend-exclude = ["**/migrations/*.py"]
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["RUF012"]
 ```
 
-The exclusion matters specifically because of what's coming in §11 — Django's `makemigrations` generates migration files with class-level `dependencies`/`operations` lists, which Ruff's `RUF012` ("mutable class default") rule flags. That boilerplate is Django's own generated convention, not something you'd hand-edit to satisfy a linter, so migrations are excluded from linting wholesale rather than patched file by file.
+This matters specifically because of what's coming in §11 — Django's `makemigrations` generates migration files with class-level `dependencies`/`operations` lists, which Ruff's `RUF012` ("mutable class default") rule flags. That's Django's own generated convention, not something you'd hand-edit to satisfy a linter, so `RUF012` is silenced for migration files specifically. This is a known, common friction point for anyone pairing Ruff with Django — not something particular to this project — and every Django+Ruff project ends up adding some version of this rule.
+
+Note this silences only `RUF012`, not linting of migrations entirely: hand-written data migrations (like Day 2's seed migration, which has real `RunPython` logic in it) still get checked for genuine bugs — unused imports, undefined names, and so on.
 
 Verify it works from the workspace root:
 
