@@ -1,2 +1,4 @@
 # Py-AI-MCP-Demo
-Project learn both how to build a Python backend and integrate a AI MCP Client/Server
+Project to learn:
+- how to build a basic Python backend and generally familiarize with the language
+- Integrate an MCP Client/Server for AI clients
