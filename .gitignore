@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# unnecessary markdowns
+docs/python-mcp-4day-plan.md
