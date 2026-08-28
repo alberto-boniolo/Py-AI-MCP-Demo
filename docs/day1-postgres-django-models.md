@@ -13,6 +13,7 @@ By the end of Day 1 you will have:
 3. A Django project (`config`) with one app (`bookings`) living at `src/django_api/`.
 4. `Building`, `Room`, and `Booking` models — a direct port of your C# entities, including the same two-level FK chain and the same deliberate string-typed `Date`/`StartTime`/`EndTime` fields.
 5. Migrations applied, all three models registered and usable in the Django Admin.
+6. A data migration seeding `Building`, `Room`, and `Booking` with the same sample data as `BookingDbContext`'s `HasData` seed, so Day 2's API has something real to query.
 
 **Definition of done:** `python manage.py runserver` starts cleanly from `src/django_api/`, the Django admin shows empty `Building`, `Room`, and `Booking` tables backed by Postgres, and you can create one of each by hand through the admin UI (a `Building`, then a `Room` inside it, then a `Booking` for that `Room`).
 
@@ -32,7 +33,7 @@ A note on `ConversationSession`: it doesn't appear in today's models, on purpose
 | EF Core Fluent API / Data Annotations | Django model **field declarations** | The field type *is* the constraint — no separate config step |
 | `dotnet ef migrations add` | `python manage.py makemigrations` | Diffs models against last known state, writes a migration file |
 | `dotnet ef database update` | `python manage.py migrate` | Applies pending migrations |
-| `modelBuilder.Entity<T>().HasData(...)` | a Django **data migration** (`RunPython`) or a fixture | Not used today — you already have a Day 2 "seed data" task in the plan; this is the Django equivalent when you get there |
+| `modelBuilder.Entity<T>().HasData(...)` | a Django **data migration** (`RunPython`) or a fixture | Used today, in §14, right after the schema migration |
 | `appsettings.json` connection string | `DATABASES` dict in `settings.py` | Same idea, different shape |
 | NuGet / `PackageReference` | `uv add` | Writes to `pyproject.toml` + lockfile, closest thing to `dotnet add package` |
 
@@ -381,7 +382,7 @@ Field-by-field translation from the C# source:
 | `Booking.Date` / `StartTime` / `EndTime` / `BookedBy` (all `string`) | `CharField` for all four | Deliberately mirrored, not "corrected" to `DateField`/`TimeField` — matches the C# comment about keeping the tool-layer boundary as plain strings |
 | `on_delete: Cascade` (implicit via EF Core convention) | `on_delete=models.CASCADE` (explicit, required) | Django won't let you omit this — you must decide per relationship |
 
-Your `BookingDbContext.OnModelCreating` seed data (Milan HQ, Building B, the four rooms, the four bookings) isn't ported today — that's a Day 2 task in the original plan ("Seed script or fixture with realistic sample data"), and its Django equivalent is either a **data migration** (`RunPython`, closest analog to `HasData`) or a fixture loaded via `loaddata`. Worth reusing the same names (`Milan HQ`, `Meeting room A`, etc.) when you get there, purely so the two sibling projects tell an obviously-consistent story in a portfolio walkthrough.
+Your `BookingDbContext.OnModelCreating` seed data (Milan HQ, Building B, the four rooms, the four bookings) is ported below, right after the schema migration, as a **data migration** — the closest analog to `HasData`. Same names as the C# seed (`Milan HQ`, `Meeting room A`, etc.), purely so the two sibling projects tell an obviously-consistent story in a portfolio walkthrough.
 
 ---
 
@@ -456,7 +457,116 @@ That three-step chain working end to end is your proof that Django ↔ psycopg �
 
 ---
 
-## 14. End-of-day checklist
+## 14. Seed data with a data migration
+
+EF Core's `modelBuilder.Entity<T>().HasData(...)` bakes seed rows into a migration so they're applied the same way as any schema change — deterministic, versioned, and re-runnable on a fresh database. Django's equivalent is a **data migration**: a normal migration file whose `operations` list contains `RunPython` calls instead of (or alongside) schema operations. Doing this now, after you've manually verified the admin UI against empty tables in §13, keeps that manual walkthrough honest — you saw the FK chain work with data *you* typed in, before anything got auto-populated.
+
+Generate an empty migration to hang the seed logic on:
+
+```powershell
+uv run python manage.py makemigrations bookings --empty --name seed_bookings
+```
+
+This produces `bookings/migrations/0002_seed_bookings.py` with an empty `operations = []` — edit it by hand:
+
+```python
+# bookings/migrations/0002_seed_bookings.py
+from django.db import migrations
+
+BUILDINGS = [
+    {"id": 1, "name": "Milan HQ"},
+    {"id": 2, "name": "Building B"},
+]
+
+ROOMS = [
+    {"id": 1, "name": "Meeting room A", "building_id": 1},
+    {"id": 2, "name": "Meeting room B", "building_id": 1},
+    {"id": 3, "name": "Room 101", "building_id": 1},
+    {"id": 4, "name": "Conference Room", "building_id": 2},
+]
+
+BOOKINGS = [
+    {"id": 1, "room_id": 1, "date": "2025-07-15", "start_time": "10:00", "end_time": "11:00", "booked_by": "Team standup"},
+    {"id": 2, "room_id": 1, "date": "2025-07-15", "start_time": "13:00", "end_time": "15:00", "booked_by": "Project review"},
+    {"id": 3, "room_id": 2, "date": "2025-07-15", "start_time": "09:00", "end_time": "12:00", "booked_by": "Workshop"},
+    {"id": 4, "room_id": 2, "date": "2025-07-15", "start_time": "14:00", "end_time": "16:00", "booked_by": "1:1 meetings"},
+]
+
+
+def seed_buildings(apps, schema_editor):
+    Building = apps.get_model("bookings", "Building")
+    for data in BUILDINGS:
+        Building.objects.update_or_create(id=data["id"], defaults=data)
+
+
+def unseed_buildings(apps, schema_editor):
+    Building = apps.get_model("bookings", "Building")
+    Building.objects.filter(id__in=[b["id"] for b in BUILDINGS]).delete()
+
+
+def seed_rooms(apps, schema_editor):
+    Room = apps.get_model("bookings", "Room")
+    for data in ROOMS:
+        Room.objects.update_or_create(id=data["id"], defaults=data)
+
+
+def unseed_rooms(apps, schema_editor):
+    Room = apps.get_model("bookings", "Room")
+    Room.objects.filter(id__in=[r["id"] for r in ROOMS]).delete()
+
+
+def seed_bookings(apps, schema_editor):
+    Booking = apps.get_model("bookings", "Booking")
+    for data in BOOKINGS:
+        Booking.objects.update_or_create(id=data["id"], defaults=data)
+
+
+def unseed_bookings(apps, schema_editor):
+    Booking = apps.get_model("bookings", "Booking")
+    Booking.objects.filter(id__in=[b["id"] for b in BOOKINGS]).delete()
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('bookings', '0001_initial'),
+    ]
+
+    operations = [
+        migrations.RunPython(seed_buildings, unseed_buildings),
+        migrations.RunPython(seed_rooms, unseed_rooms),
+        migrations.RunPython(seed_bookings, unseed_bookings),
+    ]
+```
+
+Points worth understanding, not just copying:
+
+| Detail | Why |
+|---|---|
+| `apps.get_model("bookings", "Building")` instead of `from .models import Building` | Migrations must use the **historical** version of the model as it existed at that point in migration history, not whatever `models.py` looks like today. Importing the real class would break this migration later if the model gains/loses fields. This is the Django-specific gotcha `HasData` doesn't have, since EF Core migrations are already frozen C# snapshots, not live references to your entity classes. |
+| `update_or_create(id=..., defaults=...)` with explicit `id`s | Mirrors `HasData`'s explicit-PK seeding. Makes the migration **idempotent** — safe to run against a database that already has these rows (e.g. after a partial apply), rather than erroring on a duplicate insert. |
+| A `RunPython(forward, reverse)` pair per table, in FK order | `migrate` runs `seed_buildings` → `seed_rooms` → `seed_bookings` forward (parents before children, satisfying the FK constraints), and the reverse functions run in the opposite direction if you ever unapply this migration (`migrate bookings 0001`) — `unseed_bookings` before `unseed_rooms` before `unseed_buildings`. Omitting the reverse function would still let you migrate forward, but `migrate` would refuse to unapply this migration at all. |
+| One migration file, three `RunPython` calls | Alternative would be three separate empty migrations. Bundling them keeps the seed as one atomic, single-purpose unit in migration history — matches `HasData` seeding everything in one `OnModelCreating` pass. |
+
+Apply it:
+
+```powershell
+uv run python manage.py migrate
+```
+
+Verify the rows landed:
+
+```powershell
+docker exec -it bookings-postgres psql -U bookings_user -d bookings -c "SELECT * FROM bookings_booking;"
+```
+
+You should see the four seeded bookings — these are what Day 2's API endpoints query against. **Commit `0002_seed_bookings.py`** alongside `0001_initial.py` — like any other migration, it's part of the reproducible schema/data history, not a one-off script you run and discard.
+
+> Ruff's `RUF012` rule is silenced for `**/migrations/*.py` (see §6) specifically so Django's auto-generated `dependencies`/`operations` class attributes don't trip it — but everything else in this file (the `RunPython` function bodies, the module-level data lists) is still linted normally, since it's hand-written logic, not generated boilerplate.
+
+---
+
+## 15. End-of-day checklist
 
 - [ ] `docker compose ps` shows `bookings-postgres` healthy
 - [ ] `uv run python manage.py runserver` starts with no errors from `src/django_api/`
@@ -464,6 +574,7 @@ That three-step chain working end to end is your proof that Django ↔ psycopg �
 - [ ] `Building`, `Room`, `Booking` all appear in the admin, all empty initially
 - [ ] Created one `Building` → one `Room` in it → one `Booking` for that `Room`, all through the admin UI
 - [ ] `bookings/migrations/0001_initial.py` exists and is committed
+- [ ] `bookings/migrations/0002_seed_bookings.py` exists, applied, and is committed; `SELECT * FROM bookings_booking;` shows 4 rows
 - [ ] `uv run ruff check .` runs clean from the workspace root (migrations excluded via `[tool.ruff] extend-exclude`)
 - [ ] `src/mcp_server/pyproject.toml` committed, reserving the Day 3 location
 - [ ] Root `pyproject.toml`, `uv.lock`, `docker-compose.yml`, and `src/django_api/pyproject.toml` are all committed; `.venv/`, `__pycache__/`, `db.sqlite3` are gitignored
@@ -480,6 +591,6 @@ db.sqlite3
 
 ---
 
-## 15. Bridge to Day 2
+## 16. Bridge to Day 2
 
-Tomorrow's `django-ninja` routers go over these exact models — no schema changes expected, and the seed-data task is where `Building`/`Room`/`Booking` get populated with data mirroring `BookingDbContext`'s `HasData` seed. If you do add fields once you see the API shape, that's normal — just re-run `makemigrations`/`migrate`, same discipline as adding an EF Core migration after an entity change.
+Tomorrow's `django-ninja` routers go over these exact models, already populated by §14's seed migration — `Milan HQ`/`Building B`, their rooms, and the four bookings. If you do add fields once you see the API shape, that's normal — just re-run `makemigrations`/`migrate`, same discipline as adding an EF Core migration after an entity change.
