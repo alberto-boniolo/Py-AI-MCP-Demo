@@ -13,7 +13,7 @@ By the end of Day 1 you will have:
 3. A Django project (`config`) with one app (`bookings`) living at `src/django_api/`.
 4. `Building`, `Room`, and `Booking` models — a direct port of your C# entities, including the same two-level FK chain and the same deliberate string-typed `Date`/`StartTime`/`EndTime` fields.
 5. Migrations applied, all three models registered and usable in the Django Admin.
-6. A data migration seeding `Building`, `Room`, and `Booking` with the same sample data as `BookingDbContext`'s `HasData` seed, so Day 2's API has something real to query.
+6. A data migration seeding `Building`, `Room`, and `Booking` with the same sample data as `BookingDbContext`'s `HasData` seed, so Day 2's API has something real to query — plus a follow-up migration resyncing Postgres's id sequences afterward, since the seed uses explicit PKs.
 
 **Definition of done:** `python manage.py runserver` starts cleanly from `src/django_api/`, the Django admin shows empty `Building`, `Room`, and `Booking` tables backed by Postgres, and you can create one of each by hand through the admin UI (a `Building`, then a `Room` inside it, then a `Booking` for that `Room`).
 
@@ -566,7 +566,79 @@ You should see the four seeded bookings — these are what Day 2's API endpoints
 
 ---
 
-## 15. End-of-day checklist
+## 15. Resync the id sequences after seeding
+
+`HasData`'s Postgres equivalent has a sharp edge EF Core doesn't: §14's seed migration inserts `Building`, `Room`, and `Booking` rows with **explicit `id` values** (`update_or_create(id=..., defaults=...)`). Postgres backs each auto `id` column with a sequence, but that sequence only advances when a row is inserted *without* specifying `id` — an explicit insert bypasses it entirely. After §14, every sequence is still sitting at its starting value while the tables already hold rows up to `id=4`. The first row the Django ORM inserts normally (e.g. through `django-ninja`'s `Booking.objects.create(...)` on Day 2, or through the admin UI) asks the sequence for the next id, gets `1`, and collides:
+
+```
+psycopg.errors.UniqueViolation: duplicate key value violates unique constraint "bookings_booking_pkey"
+DETAIL:  Key (id)=(1) already exists.
+```
+
+SQL Server's `IDENTITY` doesn't have this failure mode the same way — an explicit-value insert there requires `SET IDENTITY_INSERT ON` and (depending on version/config) still keeps the identity's internal counter in sync in more cases. Postgres sequences are a separate, decoupled object from the column, and nothing reconciles them automatically after a manual-PK insert.
+
+Fix it with another data migration that resyncs each sequence to `MAX(id)` right after seeding:
+
+```powershell
+uv run python manage.py makemigrations bookings --empty --name reset_sequences
+```
+
+Edit `bookings/migrations/0003_reset_sequences.py`:
+
+```python
+# bookings/migrations/0003_reset_sequences.py
+from django.core.management.color import no_style
+from django.db import migrations
+
+
+def reset_sequences(apps, schema_editor):
+    Building = apps.get_model("bookings", "Building")
+    Room = apps.get_model("bookings", "Room")
+    Booking = apps.get_model("bookings", "Booking")
+
+    style = no_style()
+    for model in (Building, Room, Booking):
+        sql = schema_editor.connection.ops.sequence_reset_sql(style, [model])
+        for statement in sql:
+            schema_editor.execute(statement)
+
+
+def noop(apps, schema_editor):
+    pass
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('bookings', '0002_seed_bookings'),
+    ]
+
+    operations = [
+        migrations.RunPython(reset_sequences, noop),
+    ]
+```
+
+`connection.ops.sequence_reset_sql(style, [model])` is the same helper Django's own `sqlsequencereset` management command uses — it generates the correct `SELECT setval(...)` for whichever PK type/backend is configured, rather than hand-writing backend-specific SQL. The reverse function is a no-op: unapplying this migration shouldn't try to rewind a sequence.
+
+Apply it:
+
+```powershell
+uv run python manage.py migrate
+```
+
+Verify:
+
+```powershell
+docker exec bookings-postgres psql -U bookings_user -d bookings -c "SELECT last_value FROM bookings_booking_id_seq;"
+```
+
+Should report `4` — the next ORM insert will correctly get `id=5`. **Commit `0003_reset_sequences.py`** alongside the other two migrations.
+
+> This is only needed because §14 seeds explicit PKs to mirror `HasData`. If you ever add a *new* seed migration that lets Postgres assign ids itself (no `id` key in the seed dict), this step isn't needed for those rows — the sequence stays in sync automatically for normal inserts.
+
+---
+
+## 16. End-of-day checklist
 
 - [ ] `docker compose ps` shows `bookings-postgres` healthy
 - [ ] `uv run python manage.py runserver` starts with no errors from `src/django_api/`
@@ -575,6 +647,7 @@ You should see the four seeded bookings — these are what Day 2's API endpoints
 - [ ] Created one `Building` → one `Room` in it → one `Booking` for that `Room`, all through the admin UI
 - [ ] `bookings/migrations/0001_initial.py` exists and is committed
 - [ ] `bookings/migrations/0002_seed_bookings.py` exists, applied, and is committed; `SELECT * FROM bookings_booking;` shows 4 rows
+- [ ] `bookings/migrations/0003_reset_sequences.py` exists, applied, and is committed; `SELECT last_value FROM bookings_booking_id_seq;` shows 4
 - [ ] `uv run ruff check .` runs clean from the workspace root (migrations excluded via `[tool.ruff] extend-exclude`)
 - [ ] `src/mcp_server/pyproject.toml` committed, reserving the Day 3 location
 - [ ] Root `pyproject.toml`, `uv.lock`, `docker-compose.yml`, and `src/django_api/pyproject.toml` are all committed; `.venv/`, `__pycache__/`, `db.sqlite3` are gitignored
@@ -591,6 +664,6 @@ db.sqlite3
 
 ---
 
-## 16. Bridge to Day 2
+## 17. Bridge to Day 2
 
-Tomorrow's `django-ninja` routers go over these exact models, already populated by §14's seed migration — `Milan HQ`/`Building B`, their rooms, and the four bookings. If you do add fields once you see the API shape, that's normal — just re-run `makemigrations`/`migrate`, same discipline as adding an EF Core migration after an entity change.
+Tomorrow's `django-ninja` routers go over these exact models, already populated by §14's seed migration and resynced by §15 — `Milan HQ`/`Building B`, their rooms, and the four bookings, with ids ready for the API to assign the next one correctly. If you do add fields once you see the API shape, that's normal — just re-run `makemigrations`/`migrate`, same discipline as adding an EF Core migration after an entity change.
