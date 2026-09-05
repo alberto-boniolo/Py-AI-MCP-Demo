@@ -43,6 +43,7 @@ async def list_bookings(
     building_id: int | None = None,
     date: str | None = None,
     booked_by: str | None = None,
+    request_id: str | None = None,
 ) -> list[BookingOut]:
     params: dict[str, Any] = {
         k: v
@@ -71,7 +72,7 @@ async def list_bookings(
 
 
 
-async def get_booking(booking_id: int) -> BookingOut:
+async def get_booking(booking_id: int, *, request_id: str | None = None) -> BookingOut:
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS) as client:
         try:
             response = await client.get(f"/bookings/{booking_id}")
@@ -92,7 +93,7 @@ async def get_booking(booking_id: int) -> BookingOut:
 
 
 async def create_booking(
-    *, room_id: int, date: str, start_time: str, end_time: str, booked_by: str
+    *, room_id: int, date: str, start_time: str, end_time: str, booked_by: str, request_id: str | None = None
 ) -> BookingOut:
     payload = {
         "room_id": room_id,

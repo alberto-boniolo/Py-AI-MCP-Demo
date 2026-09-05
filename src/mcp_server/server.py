@@ -11,7 +11,10 @@ from api_client import (
 )
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from fastmcp.server.context import Context
+from logging_setup import configure_logging
 
+logger = configure_logging("mcp_server")
 mcp = FastMCP("Bookings MCP Server")
 
 
@@ -21,11 +24,16 @@ async def list_bookings(
     building_id: int | None = None,
     date: str | None = None,
     booked_by: str | None = None,
+    ctx: Context | None = None,
 ) -> list[dict]:
     """List bookings, optionally filtered by room, building, date, or who booked it."""
     try:
         bookings = await api_list_bookings(
-            room_id=room_id, building_id=building_id, date=date, booked_by=booked_by
+            room_id=room_id,
+            building_id=building_id,
+            date=date,
+            booked_by=booked_by,
+            request_id=ctx.request_id if ctx else None,
         )
     except ApiTimeoutError as exc:
         raise ToolError(str(exc)) from exc
@@ -39,10 +47,11 @@ async def list_bookings(
 
 
 @mcp.tool
-async def get_booking(booking_id: int) -> dict:
+async def get_booking(booking_id: int, ctx: Context) -> dict:
     """Get a single booking by its id."""
+    logger.info("tool_call_start", extra={"request_id": ctx.request_id})
     try:
-        booking = await api_get_booking(booking_id)
+        booking = await api_get_booking(booking_id, request_id=ctx.request_id)
     except BookingNotFoundError as exc:
         raise ToolError(str(exc)) from exc
     except ApiTimeoutError as exc:
@@ -58,9 +67,10 @@ async def get_booking(booking_id: int) -> dict:
 
 @mcp.tool
 async def create_booking(
-    room_id: int, date: str, start_time: str, end_time: str, booked_by: str
+    room_id: int, date: str, start_time: str, end_time: str, booked_by: str, ctx: Context
 ) -> dict:
     """Create a booking for a room. date is yyyy-MM-dd, times are HH:mm."""
+    logger.info("tool_call_start", extra={"request_id": ctx.request_id})
     try:
         booking = await api_create_booking(
             room_id=room_id,
@@ -68,6 +78,7 @@ async def create_booking(
             start_time=start_time,
             end_time=end_time,
             booked_by=booked_by,
+            request_id=ctx.request_id,
         )
     except BookingNotFoundError as exc:
         raise ToolError(str(exc)) from exc
