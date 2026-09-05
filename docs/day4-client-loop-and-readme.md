@@ -131,7 +131,9 @@ Create `src/claude_client/.env` per §2 (or move the one you already created the
 
 ## 5. Finish Day 3's deferred error handling
 
-Day 3 §8 explicitly punted two failure modes to today: a non-404 failure from Django (a DB outage surfacing as a 500, or any other unhandled server error), and `httpx` timing out instead of connecting cleanly. Both get added to `api_client.py` now, informed by nothing more exotic than "what else can `httpx` raise here" — no need to invent hypothetical failure shapes. **Nothing in this section depends on which model backend drives the client** — it's fixing `mcp_server`, which Day 3 already proved works identically with Claude Desktop and will work identically with today's Claude-API-driven client.
+**Both files edited in this section — `api_client.py` and `server.py` — live in `src/mcp_server/`** (Day 3's server, per §3's file tree), not in today's new `src/claude_client/`. Nothing here touches the new workspace member.
+
+Day 3 §8 explicitly punted two failure modes to today: a non-404 failure from Django (a DB outage surfacing as a 500, or any other unhandled server error), and `httpx` timing out instead of connecting cleanly. Both get added to `src/mcp_server/api_client.py` now, informed by nothing more exotic than "what else can `httpx` raise here" — no need to invent hypothetical failure shapes. **Nothing in this section depends on which model backend drives the client** — it's fixing `mcp_server`, which Day 3 already proved works identically with Claude Desktop and will work identically with today's Claude-API-driven client.
 
 **What's *not* being added, on purpose:** a blanket `except Exception` catch-all in each tool function. fastmcp already has a sensible default for a genuinely unexpected exception — it logs the real error server-side and returns the caller a generic, masked message (`mask_error_details`, mentioned in Day 3 §1) rather than leaking internals. That's the correct behavior for "something no one anticipated," and duplicating it with your own catch-all per tool would just be defensive code protecting against nothing new. Today's additions are for two *specific, real, reachable* failure modes — not a hedge against the unknown.
 
@@ -178,7 +180,7 @@ Notes:
 - **`raise_for_status()` moved inside its own `try`** — Day 3 already called it unconditionally after the 404 check; today it's wrapped so a 500 (or any other non-404 error status) becomes your own `ApiError` with the response body attached, instead of an opaque `HTTPStatusError` that `server.py` would have to know `httpx`-specific details to unpack.
 - **`response.text[:200]`** — enough of a Django error page or DRF-style error body to be useful in a log line, short enough not to dump an entire HTML 500 page into a tool error message an LLM might echo back to a user.
 
-Now update `server.py` to map both new exceptions to `ToolError`, alongside the existing ones — shown for `get_booking`, same pattern applies to the other two:
+Now update `src/mcp_server/server.py` to map both new exceptions to `ToolError`, alongside the existing ones — shown for `get_booking`, same pattern applies to the other two:
 
 ```python
 @mcp.tool
@@ -201,8 +203,8 @@ async def get_booking(booking_id: int) -> dict:
 
 **Verify by hand before moving on** — same "trigger it for real" discipline as Day 3 §6:
 
-1. Stop `docker compose stop postgres` (leave Django running) and call any tool from the Inspector (`uv run fastmcp dev inspector server.py` from `src/mcp_server/`, same command as Day 3 §6). Django's own DB connection fails, Ninja surfaces a 500, and you should see your new `ApiError`'s message in the Inspector — not a raw traceback. Restart Postgres afterward (`docker compose start postgres`).
-2. The timeout path is legitimately harder to trigger by hand without artificially slowing something down — trust the symmetry with the 404/`ConnectError` precedent Day 3 already proved works, rather than manufacturing an artificial delay just to exercise it today.
+1. Stop Postgres (`docker compose stop postgres`, or `docker compose down`) and call any tool from the Inspector (`uv run fastmcp dev inspector server.py` from `src/mcp_server/`, same command as Day 3 §6). In practice this reliably surfaces as `ApiTimeoutError` rather than a clean fast 500 — on Docker Desktop for Windows, a stopped/removed container's port mapping can leave the connection hanging instead of refusing immediately, so Django's own DB connection attempt outlasts your `REQUEST_TIMEOUT_SECONDS` before it ever gets to return a 500. That's still a real, correctly-handled failure path (you should see your `ApiTimeoutError` message in the Inspector, not a raw traceback) — just not the specific 500 scenario. Reliably forcing the fast-500 path would mean fighting Docker Desktop's networking quirks for a marginal return; not worth it today. Restart Postgres afterward (`docker compose up -d`) — the seeded data survives in the `postgres_data` named volume regardless of `stop`/`down`.
+2. The timeout path is legitimately harder to trigger *deliberately* without artificially slowing something down — but as step 1 shows, you'll likely hit it anyway when testing the DB-down scenario, which is enough real-world coverage for today.
 
 ---
 
