@@ -1,8 +1,5 @@
 import httpx
-from api_client import (
-    BookingNotFoundError,
-    RoomNotFoundError,
-)
+from api_client import ApiError, ApiTimeoutError, BookingNotFoundError
 from api_client import (
     create_booking as api_create_booking,
 )
@@ -30,6 +27,10 @@ async def list_bookings(
         bookings = await api_list_bookings(
             room_id=room_id, building_id=building_id, date=date, booked_by=booked_by
         )
+    except ApiTimeoutError as exc:
+        raise ToolError(str(exc)) from exc
+    except ApiError as exc:
+        raise ToolError(f"The bookings API returned an error: {exc}") from exc
     except httpx.ConnectError as exc:
         raise ToolError(
             "Could not reach the bookings API — is the Django server running?"
@@ -44,6 +45,10 @@ async def get_booking(booking_id: int) -> dict:
         booking = await api_get_booking(booking_id)
     except BookingNotFoundError as exc:
         raise ToolError(str(exc)) from exc
+    except ApiTimeoutError as exc:
+        raise ToolError(str(exc)) from exc
+    except ApiError as exc:
+        raise ToolError(f"The bookings API returned an error: {exc}") from exc
     except httpx.ConnectError as exc:
         raise ToolError(
             "Could not reach the bookings API — is the Django server running?"
@@ -64,8 +69,12 @@ async def create_booking(
             end_time=end_time,
             booked_by=booked_by,
         )
-    except RoomNotFoundError as exc:
+    except BookingNotFoundError as exc:
         raise ToolError(str(exc)) from exc
+    except ApiTimeoutError as exc:
+        raise ToolError(str(exc)) from exc
+    except ApiError as exc:
+        raise ToolError(f"The bookings API returned an error: {exc}") from exc
     except httpx.ConnectError as exc:
         raise ToolError(
             "Could not reach the bookings API — is the Django server running?"

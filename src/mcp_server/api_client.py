@@ -4,6 +4,8 @@ import httpx
 from pydantic import BaseModel
 
 BASE_URL = "http://127.0.0.1:8000/api"
+REQUEST_TIMEOUT_SECONDS = 5.0
+ERR_MESSAGE_MAX_CHARS = 200
 
 
 class BookingOut(BaseModel):
@@ -27,6 +29,14 @@ class RoomNotFoundError(Exception):
         super().__init__(f"Room {room_id} not found")
 
 
+class ApiError(Exception):
+    """A non-404 error response from the bookings API (e.g. a 500 from a DB failure)."""
+
+
+class ApiTimeoutError(Exception):
+    """The bookings API didn't respond in time."""
+
+
 async def list_bookings(
     *,
     room_id: int | None = None,
@@ -44,18 +54,40 @@ async def list_bookings(
         }.items()
         if v is not None
     }
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
-        response = await client.get("/bookings", params=params)
-        response.raise_for_status()
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        try:
+            response = await client.get("/bookings", params=params)
+        except httpx.TimeoutException as exc:
+            raise ApiTimeoutError("The bookings API took too long to respond") from exc
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ApiError(
+                f"Bookings API returned {response.status_code}: {response.text[:ERR_MESSAGE_MAX_CHARS]}"
+            ) from exc
+
         return [BookingOut(**row) for row in response.json()]
 
 
+
 async def get_booking(booking_id: int) -> BookingOut:
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
-        response = await client.get(f"/bookings/{booking_id}")
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        try:
+            response = await client.get(f"/bookings/{booking_id}")
+        except httpx.TimeoutException as exc:
+            raise ApiTimeoutError("The bookings API took too long to respond") from exc
+
         if response.status_code == 404:
             raise BookingNotFoundError(booking_id)
-        response.raise_for_status()
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ApiError(
+                f"Bookings API returned {response.status_code}: {response.text[:ERR_MESSAGE_MAX_CHARS]}"
+            ) from exc
+
         return BookingOut(**response.json())
 
 
@@ -69,9 +101,20 @@ async def create_booking(
         "end_time": end_time,
         "booked_by": booked_by,
     }
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
-        response = await client.post("/bookings", json=payload)
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        try:
+            response = await client.post("/bookings", json=payload)
+        except httpx.TimeoutException as exc:
+            raise ApiTimeoutError("The bookings API took too long to respond") from exc
+
         if response.status_code == 404:
             raise RoomNotFoundError(room_id)
-        response.raise_for_status()
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ApiError(
+                f"Bookings API returned {response.status_code}: {response.text[:ERR_MESSAGE_MAX_CHARS]}"
+            ) from exc
+
         return BookingOut(**response.json())
