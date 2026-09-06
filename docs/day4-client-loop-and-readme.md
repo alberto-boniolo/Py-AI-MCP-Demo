@@ -431,9 +431,9 @@ import json
 import uuid
 
 import anthropic
+from anthropic.types import MessageParam, ToolParam
 from dotenv import load_dotenv
 from fastmcp import Client
-
 from logging_setup import configure_logging
 
 load_dotenv()
@@ -451,7 +451,7 @@ SYSTEM_PROMPT = (
 logger = configure_logging("claude_client")
 
 
-def mcp_tools_to_anthropic(mcp_tools) -> list[dict]:
+def mcp_tools_to_anthropic(mcp_tools) -> list[ToolParam]:
     return [
         {
             "name": tool.name,
@@ -470,10 +470,11 @@ async def run_chat_loop() -> None:
 
     async with Client(MCP_SERVER_SCRIPT) as mcp_client:
         mcp_tools = await mcp_client.list_tools()
+        # print(vars(mcp_tools[0])) # DEBUG .inputSchema could change between fastMCP versions
         tools = mcp_tools_to_anthropic(mcp_tools)
         tool_names = {tool.name for tool in mcp_tools}
 
-        messages: list[dict] = []
+        messages: list[MessageParam] = []
         print("Bookings assistant ready. Type a question, or 'exit' to quit.\n")
 
         while True:
@@ -521,7 +522,7 @@ async def run_chat_loop() -> None:
                             content = json.dumps(result.data)
                             is_error = False
                             logger.info("tool_call_ok", extra={"request_id": session_id})
-                        except Exception as exc:  # ToolError, ValidationError, etc.
+                        except Exception as exc:  # ToolError, ValidationError, etc. It's ok to be a catch all  # noqa: BLE001
                             content = f"Tool error: {exc}"
                             is_error = True
                             logger.warning(
