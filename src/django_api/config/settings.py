@@ -150,6 +150,13 @@ LOGGING = {
             "filters": ["request_id"],
         },
     },
+    "loggers": {
+        "django.server": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
     "root": {
         "handlers": ["console"],
         "level": "INFO",

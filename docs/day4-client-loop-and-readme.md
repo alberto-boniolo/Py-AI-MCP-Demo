@@ -23,15 +23,15 @@ By the end of Day 4 you will have:
 
 ## 1. Mental model before you type anything
 
-| .NET/C# concept | Today's Python equivalent | Notes |
-|---|---|---|
-| A hand-rolled console client calling an internal API, `HttpClient` + a loop reading `Console.ReadLine()` | `client.py` in `src/claude_client/`, reading `input()` in a `while` loop | Same shape — no framework here either, just a loop |
-| Calling Azure AI Foundry / MAF's model client with a tool/function list attached to the request | `anthropic.AsyncAnthropic().messages.create(model=..., messages=..., tools=[...])` | Same idea: the tool list rides along on every request; the model decides whether to use one |
-| MAF's own MCP client plumbing, wrapping an `McpClientTool` for the model | `fastmcp.Client("server.py")` (the same package Day 3 used server-side; `fastmcp` ships a client too) | One package, two roles — server and client — the same way `Microsoft.Extensions.AI` gives you both server- and client-side MCP support from one package family |
-| Manually mapping an OpenAPI/function schema into the shape a model's function-calling API expects | Renaming one key: MCP's `Tool.inputSchema` becomes Anthropic's `input_schema` field, `name`/`description` pass straight through | Anthropic's tool shape (`{"name", "description", "input_schema"}`) is a flatter, closer match to MCP's own `Tool` shape than most providers' nested `{"type": "function", "function": {...}}` wrapper — today's bridge is a rename, not a reshape |
-| `ModelState.IsValid` / a `[FromBody]` DTO's automatic `400` | fastmcp validates a tool call's arguments against the same JSON Schema it published, *before* your function body runs, and raises `ValidationError` if they don't match | Same "type hint is the contract" story you already saw with Ninja's automatic `422` on Day 2 — nothing to build for "malformed tool arguments," see §5 |
-| Serilog's `LogContext.PushProperty("CorrelationId", id)` enriching every log line for a request | a `contextvars.ContextVar` read by a custom `logging.Filter` in Django; an explicit `extra={"request_id": ...}` per call in the MCP server and client | Python's stdlib `logging` has no built-in context-scoped enrichment like Serilog's `LogContext` — you wire the equivalent yourself with `contextvars`, see §6 |
-| `return NotFound()` mapped by a custom `ExceptionFilter` to a typed problem-details response | Anthropic's typed exception hierarchy (`anthropic.RateLimitError`, `anthropic.APIConnectionError`, `anthropic.APIStatusError`, ...) | Worth catching most-specific-first, same discipline as a C# `catch` chain ordered from derived to base — see §8 |
+| .NET/C# concept                                                                                          | Today's Python equivalent                                                                                                                                               | Notes                                                                                                                                                                                                                                             |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A hand-rolled console client calling an internal API, `HttpClient` + a loop reading `Console.ReadLine()` | `client.py` in `src/claude_client/`, reading `input()` in a `while` loop                                                                                                | Same shape — no framework here either, just a loop                                                                                                                                                                                                |
+| Calling Azure AI Foundry / MAF's model client with a tool/function list attached to the request          | `anthropic.AsyncAnthropic().messages.create(model=..., messages=..., tools=[...])`                                                                                      | Same idea: the tool list rides along on every request; the model decides whether to use one                                                                                                                                                       |
+| MAF's own MCP client plumbing, wrapping an `McpClientTool` for the model                                 | `fastmcp.Client("server.py")` (the same package Day 3 used server-side; `fastmcp` ships a client too)                                                                   | One package, two roles — server and client — the same way `Microsoft.Extensions.AI` gives you both server- and client-side MCP support from one package family                                                                                    |
+| Manually mapping an OpenAPI/function schema into the shape a model's function-calling API expects        | Renaming one key: MCP's `Tool.inputSchema` becomes Anthropic's `input_schema` field, `name`/`description` pass straight through                                         | Anthropic's tool shape (`{"name", "description", "input_schema"}`) is a flatter, closer match to MCP's own `Tool` shape than most providers' nested `{"type": "function", "function": {...}}` wrapper — today's bridge is a rename, not a reshape |
+| `ModelState.IsValid` / a `[FromBody]` DTO's automatic `400`                                              | fastmcp validates a tool call's arguments against the same JSON Schema it published, *before* your function body runs, and raises `ValidationError` if they don't match | Same "type hint is the contract" story you already saw with Ninja's automatic `422` on Day 2 — nothing to build for "malformed tool arguments," see §5                                                                                            |
+| Serilog's `LogContext.PushProperty("CorrelationId", id)` enriching every log line for a request          | a `contextvars.ContextVar` read by a custom `logging.Filter` in Django; an explicit `extra={"request_id": ...}` per call in the MCP server and client                   | Python's stdlib `logging` has no built-in context-scoped enrichment like Serilog's `LogContext` — you wire the equivalent yourself with `contextvars`, see §6                                                                                     |
+| `return NotFound()` mapped by a custom `ExceptionFilter` to a typed problem-details response             | Anthropic's typed exception hierarchy (`anthropic.RateLimitError`, `anthropic.APIConnectionError`, `anthropic.APIStatusError`, ...)                                     | Worth catching most-specific-first, same discipline as a C# `catch` chain ordered from derived to base — see §8                                                                                                                                   |
 
 Structural things that are genuinely different, not just renamed:
 
@@ -214,9 +214,9 @@ The plan calls for a shared identifier that traces one request across Django, th
 
 **Where the identifier can actually cross a process boundary — and where it can't, honestly.** MCP → Django is a real network call (`httpx` over HTTP), so an id can ride along as a header, the same way a `traceparent` header would. Client → MCP server is a local **stdio** pipe, not HTTP — there's no header to attach it to at that layer without reaching into MCP's lower-level `_meta` protocol field, which isn't something today's `fastmcp.Client` surface exposes simply. Rather than force an inaccurate abstraction, today's design uses two identifiers with an honest scope each:
 
-| Identifier | Scope | Where it's set |
-|---|---|---|
-| `session_id` | one whole run of `client.py`, logged on every client-side log line | generated once at startup in `client.py` |
+| Identifier   | Scope                                                              | Where it's set                                                                                                               |
+| ------------ | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `session_id` | one whole run of `client.py`, logged on every client-side log line | generated once at startup in `client.py`                                                                                     |
 | `request_id` | one MCP tool call → its downstream Django API call, shared by both | fastmcp's own `ctx.request_id` (already assigned per call by the framework), forwarded to Django as an `X-Request-Id` header |
 
 That's a real, followable trace for the hop that matters most (MCP → Django, the one that could actually fail independently), plus an honest per-run id at the client — not a fabricated single id pretending to span a boundary that doesn't carry one today.
@@ -345,11 +345,8 @@ class RequestIdMiddleware:
 
     def __call__(self, request):
         incoming = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:8]
-        token = request_id_var.set(incoming)
-        try:
-            return self.get_response(request)
-        finally:
-            request_id_var.reset(token)
+        request_id_var.set(incoming)
+        return self.get_response(request)
 ```
 
 This is the `contextvars`-based equivalent of Serilog's `LogContext.PushProperty` flagged in §1 — Django (and Python's stdlib `logging` generally) has no built-in request-scoped log enrichment, so the middleware + filter pair *is* the wiring, not a shortcut around it. `contextvars` (rather than a plain module-level global) matters specifically because Django can serve requests concurrently under ASGI — a plain global would leak one request's id into another's log lines under concurrent load; a `ContextVar` is isolated per async task/thread the same way `AsyncLocal<T>` is in .NET.
@@ -380,6 +377,13 @@ LOGGING = {
             "class": "logging.StreamHandler",
             "formatter": "json",
             "filters": ["request_id"],
+        },
+    },
+    "loggers": {
+        "django.server": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
     },
     "root": {

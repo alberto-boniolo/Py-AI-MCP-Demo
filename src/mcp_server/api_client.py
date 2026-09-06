@@ -55,7 +55,8 @@ async def list_bookings(
         }.items()
         if v is not None
     }
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS) as client:
+    headers = {"X-Request-Id": request_id} if request_id else {}
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS, headers=headers) as client:
         try:
             response = await client.get("/bookings", params=params)
         except httpx.TimeoutException as exc:
@@ -73,7 +74,8 @@ async def list_bookings(
 
 
 async def get_booking(booking_id: int, *, request_id: str | None = None) -> BookingOut:
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS) as client:
+    headers = {"X-Request-Id": request_id} if request_id else {}
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS, headers=headers) as client:
         try:
             response = await client.get(f"/bookings/{booking_id}")
         except httpx.TimeoutException as exc:
@@ -102,7 +104,8 @@ async def create_booking(
         "end_time": end_time,
         "booked_by": booked_by,
     }
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS) as client:
+    headers = {"X-Request-Id": request_id} if request_id else {}
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS, headers=headers) as client:
         try:
             response = await client.post("/bookings", json=payload)
         except httpx.TimeoutException as exc:

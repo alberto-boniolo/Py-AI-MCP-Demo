@@ -34,8 +34,5 @@ class RequestIdMiddleware:
 
     def __call__(self, request):
         incoming = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:8]
-        token = request_id_var.set(incoming)
-        try:
-            return self.get_response(request)
-        finally:
-            request_id_var.reset(token)
+        request_id_var.set(incoming)
+        return self.get_response(request)

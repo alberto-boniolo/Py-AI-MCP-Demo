@@ -27,13 +27,15 @@ async def list_bookings(
     ctx: Context | None = None,
 ) -> list[dict]:
     """List bookings, optionally filtered by room, building, date, or who booked it."""
+    request_id = ctx.request_id if ctx else None
+    logger.info("tool_call_start", extra={"request_id": request_id})
     try:
         bookings = await api_list_bookings(
             room_id=room_id,
             building_id=building_id,
             date=date,
             booked_by=booked_by,
-            request_id=ctx.request_id if ctx else None,
+            request_id=request_id,
         )
     except ApiTimeoutError as exc:
         raise ToolError(str(exc)) from exc
@@ -43,15 +45,17 @@ async def list_bookings(
         raise ToolError(
             "Could not reach the bookings API — is the Django server running?"
         ) from exc
+    logger.info("tool_call_ok", extra={"request_id": request_id})
     return [b.model_dump() for b in bookings]
 
 
 @mcp.tool
 async def get_booking(booking_id: int, ctx: Context) -> dict:
     """Get a single booking by its id."""
-    logger.info("tool_call_start", extra={"request_id": ctx.request_id})
+    request_id = ctx.request_id
+    logger.info("tool_call_start", extra={"request_id": request_id})
     try:
-        booking = await api_get_booking(booking_id, request_id=ctx.request_id)
+        booking = await api_get_booking(booking_id, request_id=request_id)
     except BookingNotFoundError as exc:
         raise ToolError(str(exc)) from exc
     except ApiTimeoutError as exc:
@@ -62,6 +66,7 @@ async def get_booking(booking_id: int, ctx: Context) -> dict:
         raise ToolError(
             "Could not reach the bookings API — is the Django server running?"
         ) from exc
+    logger.info("tool_call_ok", extra={"request_id": request_id})
     return booking.model_dump()
 
 
@@ -70,7 +75,8 @@ async def create_booking(
     room_id: int, date: str, start_time: str, end_time: str, booked_by: str, ctx: Context
 ) -> dict:
     """Create a booking for a room. date is yyyy-MM-dd, times are HH:mm."""
-    logger.info("tool_call_start", extra={"request_id": ctx.request_id})
+    request_id = ctx.request_id
+    logger.info("tool_call_start", extra={"request_id": request_id})
     try:
         booking = await api_create_booking(
             room_id=room_id,
@@ -78,7 +84,7 @@ async def create_booking(
             start_time=start_time,
             end_time=end_time,
             booked_by=booked_by,
-            request_id=ctx.request_id,
+            request_id=request_id,
         )
     except BookingNotFoundError as exc:
         raise ToolError(str(exc)) from exc
@@ -90,6 +96,7 @@ async def create_booking(
         raise ToolError(
             "Could not reach the bookings API — is the Django server running?"
         ) from exc
+    logger.info("tool_call_ok", extra={"request_id": request_id})
     return booking.model_dump()
 
 
